@@ -4,6 +4,7 @@ from os import path as osp
 from pyquaternion import Quaternion
 import argparse
 from nusc_split import TRAIN_SCENES, VAL_SCENES
+import os
 
 nus_categories = ('car', 'truck', 'trailer', 'bus', 'construction_vehicle',
                   'bicycle', 'motorcycle', 'pedestrian', 'traffic_cone',
@@ -165,7 +166,8 @@ def create_nuscenes_infos_map(root_path,
             test_samples.append(info)
     
     if dest_path is None:
-        dest_path = root_path
+        dest_path = os.path.join(root_path, 'custom', 'maptracker')
+        mmcv.mkdir_or_exist(dest_path)
     
     if test:
         info_path = osp.join(dest_path, f'{info_prefix}_map_infos_test.pkl')

@@ -72,51 +72,6 @@ def parse_args():
     return args
 
 
-def combine_images_with_labels(
-    image_paths, labels, output_path, font_scale=0.5, font_color=(0, 0, 0)
-):
-    # Load images
-    images = [cv2.imread(path) for path in image_paths]
-
-    # Determine the maximum dimensions
-    max_height = max(image.shape[0] for image in images)
-    max_width = max(image.shape[1] for image in images)
-
-    # Create a blank white canvas to hold the 2x2 grid of images
-    final_image = np.ones((max_height * 1, max_width * 2, 3), dtype=np.uint8) * 255
-
-    # Font settings
-    font = cv2.FONT_HERSHEY_SIMPLEX
-
-    for i, img in enumerate(images):
-        # Resize image if necessary
-        img = cv2.resize(img, (max_width, max_height))
-
-        # Calculate position for each image
-        x_offset = (i % 2) * max_width
-        y_offset = (i // 2) * max_height
-
-        # Place image in the canvas
-        final_image[
-            y_offset : y_offset + max_height, x_offset : x_offset + max_width
-        ] = img
-
-        # Add label
-        cv2.putText(
-            final_image,
-            labels[i],
-            (x_offset + 5, y_offset + 15),
-            font,
-            font_scale,
-            font_color,
-            1,
-            cv2.LINE_AA,
-        )
-
-    # Save the final image
-    cv2.imwrite(output_path, final_image)
-
-
 def merge_corssing(polylines):
     convex_hull_polygon = find_largest_convex_hull(polylines)
     return convex_hull_polygon
@@ -853,77 +808,24 @@ def get_prev2curr_vectors(
 
 def plot_fig_merged_per_frame(
     num_frames,
-    car_trajectory,
-    x_min,
-    x_max,
-    y_min,
-    y_max,
-    pred_save_folder,
     id_prev2curr_pred_vectors,
     id_prev2curr_pred_frame,
     args,
 ):
-    os.makedirs(pred_save_folder, exist_ok=True)
 
     # key the current status of the instance, add into the dict when it first appears
     instance_bank = dict()
 
-    # trace the path reversely, get the sub-sampled traj for visualizing the car
-    pre_center = car_trajectory[-1][0]
-    selected_traj_timesteps = []
-    for timestep, (car_center, rotation_degrees) in enumerate(car_trajectory[::-1]):
-        if (
-            np.linalg.norm(car_center - pre_center) < 5
-            and timestep > 0
-            and timestep < len(car_trajectory) - 1
-        ):
-            continue
-        selected_traj_timesteps.append(len(car_trajectory) - 1 - timestep)
-        pre_center = car_center
-    selected_traj_timesteps = selected_traj_timesteps[::-1]
-
-    image_list = [
-        pred_save_folder + f"/{frame_timestep}.png"
-        for frame_timestep in range(num_frames)
-    ]
-    # save_t(len(image_list), pred_save_folder) # save the timestep text mp4 file
-
     # plot the figure at each frame
+    merged_maps = []
     for frame_timestep in range(num_frames):
-        plt.figure(facecolor="lightgreen")
-        fig = plt.figure(
-            figsize=(
-                int(abs(x_min) + abs(x_max)) + 10,
-                int(abs(y_min) + abs(y_max)) + 10,
-            )
-        )
-        ax = fig.add_subplot(1, 1, 1)
-        ax.set_xlim(x_min, x_max)
-        ax.set_ylim(y_min, y_max)
-
-        # setup the figure with car
-        car_img = Image.open("resources/car-orange.png")
-        faded_rate = np.linspace(0.2, 1, num=len(car_trajectory))
-        pre_center = car_trajectory[0][0]
-
-        for t in selected_traj_timesteps:  # only plot the car at the selected timesteps
-            if t > frame_timestep:  # if the car has not appeared at this frame
-                break
-            car_center, rotation_degrees = car_trajectory[t]
-            translation = transforms.Affine2D().translate(car_center[0], car_center[1])
-            rotation = transforms.Affine2D().rotate_deg(rotation_degrees)
-            rotation_translation = rotation + translation
-            ax.imshow(
-                car_img,
-                extent=[-2.2, 2.2, -2, 2],
-                transform=rotation_translation + ax.transData,
-                alpha=faded_rate[t],
-            )
+        merged_map = []
 
         for vec_tag, vec_all_frames in id_prev2curr_pred_vectors.items():
             vec_frame_info = id_prev2curr_pred_frame[vec_tag]
             first_appear_frame = sorted(list(vec_frame_info.keys()))[0]
 
+            # 看当前帧是否有这个instance
             need_merge = False
             if frame_timestep < first_appear_frame:  # the instance has not appeared
                 continue
@@ -935,6 +837,7 @@ def plot_fig_merged_per_frame(
             label = int(label)
             vec_glb_idx = int(vec_glb_idx)
 
+            # 如果需要merge，就把当前帧的vector加入到instance_bank中
             if need_merge:
                 curr_vec = vec_all_frames[vec_index_in_instance]
                 curr_vec_polyline = LineString(curr_vec)
@@ -949,15 +852,9 @@ def plot_fig_merged_per_frame(
             else:  # if the instance has not appeared in this frame
                 polylines = instance_bank[vec_tag]
 
-            if label == 0:  # ped_crossing
-                color = "b"
-            elif label == 1:  # divider
-                color = "r"
-            elif label == 2:  # boundary
-                color = "g"
-
             if label == 0:  # crossing, merged by convex hull
                 if need_merge:
+                    # 融合多个polyline
                     polygon = merge_corssing(polylines)
                     polygon = polygon.simplify(args.simplify)
                     vector = np.array(polygon.exterior.coords)
@@ -965,24 +862,13 @@ def plot_fig_merged_per_frame(
                     vector = np.array(polylines[0].coords)
 
                 pts = vector[:, :2]
-                x = np.array([pt[0] for pt in pts])
-                y = np.array([pt[1] for pt in pts])
-                ax.plot(
-                    x,
-                    y,
-                    "-",
-                    color=color,
-                    linewidth=20,
-                    markersize=50,
-                    alpha=args.line_opacity,
-                )
-                ax.plot(x, y, "o", color=color, markersize=50)
 
                 # update instance bank for ped
                 updated_polyline = LineString(vector)
                 instance_bank[vec_tag] = [
                     updated_polyline,
                 ]
+                merged_map.append({"label": label, "geom": pts, "type": "vectorized"})
 
             elif label == 1:  # divider, merged fitting a polyline
                 if need_merge:
@@ -998,18 +884,8 @@ def plot_fig_merged_per_frame(
                         LineString(one_line).simplify(args.simplify * 2).coords
                     )
                     pts = one_line[:, :2]
-                    x = np.array([pt[0] for pt in pts])
-                    y = np.array([pt[1] for pt in pts])
-                    ax.plot(
-                        x,
-                        y,
-                        "-",
-                        color=color,
-                        linewidth=20,
-                        markersize=50,
-                        alpha=args.line_opacity,
-                    )
-                    ax.plot(x, y, "o", color=color, markersize=50)
+
+                    merged_map.append({"label": label, "geom": pts, "type": "vectorized"})
 
                 # update instance bank for line
                 updated_polylines = [LineString(vec) for vec in polylines_vecs]
@@ -1029,425 +905,20 @@ def plot_fig_merged_per_frame(
                         LineString(one_line).simplify(args.simplify).coords
                     )
                     pts = one_line[:, :2]
-                    x = np.array([pt[0] for pt in pts])
-                    y = np.array([pt[1] for pt in pts])
-                    ax.plot(
-                        x,
-                        y,
-                        "-",
-                        color=color,
-                        linewidth=20,
-                        markersize=50,
-                        alpha=args.line_opacity,
-                    )
-                    ax.plot(x, y, "o", color=color, markersize=50)
+
+                    merged_map.append({"label": label, "geom": pts, "type": "vectorized"})
 
                 # update instance bank for line
                 updated_polylines = [LineString(vec) for vec in polylines_vecs]
                 instance_bank[vec_tag] = updated_polylines
 
-        pred_save_path = pred_save_folder + f"/{frame_timestep}.png"
-        plt.grid(False)
-        plt.savefig(
-            pred_save_path,
-            bbox_inches="tight",
-            transparent=args.transparent,
-            dpi=args.dpi,
-        )
-        plt.clf()
-        plt.close(fig)
-        print("image saved to : ", pred_save_path)
+        merged_maps.append(merged_map)
 
-    image_list = [
-        pred_save_folder + f"/{frame_timestep}.png"
-        for frame_timestep in range(num_frames)
-    ]
-    gif_output_path = pred_save_folder + "/vis.gif"
-    save_as_video(image_list, gif_output_path)
-
-
-# merge the vectors across all frames and plot the merged vectors
-def plot_fig_merged(
-    car_trajectory,
-    x_min,
-    x_max,
-    y_min,
-    y_max,
-    pred_save_path,
-    id_prev2curr_pred_vectors,
-    args,
-):
-
-    # setup the figure with car
-    fig = plt.figure(
-        figsize=(int(abs(x_min) + abs(x_max)) + 10, int(abs(y_min) + abs(y_max)) + 10)
-    )
-    ax = fig.add_subplot(1, 1, 1)
-    ax.set_xlim(x_min, x_max)
-    ax.set_ylim(y_min, y_max)
-    car_img = Image.open("resources/car-orange.png")
-
-    faded_rate = np.linspace(0.2, 1, num=len(car_trajectory))
-
-    # trace the path reversely, get the sub-sampled traj for visualizing the car
-    pre_center = car_trajectory[-1][0]
-    selected_traj = []
-    selected_timesteps = []
-    for timestep, (car_center, rotation_degrees) in enumerate(car_trajectory[::-1]):
-        if (
-            np.linalg.norm(car_center - pre_center) < 5
-            and timestep > 0
-            and timestep < len(car_trajectory) - 1
-        ):
-            continue
-        selected_traj.append([car_center, rotation_degrees])
-        selected_timesteps.append(len(car_trajectory) - 1 - timestep)
-        pre_center = car_center
-    selected_traj = selected_traj[::-1]
-    selected_timesteps = selected_timesteps[::-1]
-
-    for selected_t, (car_center, rotation_degrees) in zip(
-        selected_timesteps, selected_traj
-    ):
-        translation = transforms.Affine2D().translate(car_center[0], car_center[1])
-        rotation = transforms.Affine2D().rotate_deg(rotation_degrees)
-        rotation_translation = rotation + translation
-        ax.imshow(
-            car_img,
-            extent=[-2.2, 2.2, -2, 2],
-            transform=rotation_translation + ax.transData,
-            alpha=faded_rate[selected_t],
-        )
-
-    # merge the vectors across all frames
-    for tag, vecs in id_prev2curr_pred_vectors.items():
-        label, vec_glb_idx = tag.split("_")
-        label = int(label)
-        vec_glb_idx = int(vec_glb_idx)
-
-        if label == 0:  # ped_crossing
-            color = "b"
-        elif label == 1:  # divider
-            color = "r"
-        elif label == 2:  # boundary
-            color = "g"
-
-        # get the vectors belongs to the same instance
-        polylines = []
-        for vec in vecs:
-            polylines.append(LineString(vec))
-        if len(polylines) <= 0:
-            continue
-
-        if label == 0:  # crossing, merged by convex hull
-            polygon = merge_corssing(polylines)
-            if polygon.area < 2:
-                continue
-            polygon = polygon.simplify(args.simplify)
-            vector = np.array(polygon.exterior.coords)
-            pts = vector[:, :2]
-            x = np.array([pt[0] for pt in pts])
-            y = np.array([pt[1] for pt in pts])
-            ax.plot(
-                x,
-                y,
-                "-",
-                color=color,
-                linewidth=20,
-                markersize=50,
-                alpha=args.line_opacity,
-            )
-            ax.plot(x, y, "o", color=color, markersize=50)
-        elif label == 1:  # divider, merged by interpolation
-            polylines_vecs = [np.array(one_line.coords) for one_line in polylines]
-            polylines_vecs = merge_divider(polylines_vecs)
-            for one_line in polylines_vecs:
-                one_line = np.array(LineString(one_line).simplify(args.simplify).coords)
-                pts = one_line[:, :2]
-                x = np.array([pt[0] for pt in pts])
-                y = np.array([pt[1] for pt in pts])
-                ax.plot(
-                    x,
-                    y,
-                    "-",
-                    color=color,
-                    linewidth=20,
-                    markersize=50,
-                    alpha=args.line_opacity,
-                )
-                ax.plot(x, y, "o", color=color, markersize=50)
-        elif label == 2:  # boundary, merged by interpolation
-            polylines_vecs = [np.array(one_line.coords) for one_line in polylines]
-            polylines_vecs = merge_boundary(polylines_vecs)
-            for one_line in polylines_vecs:
-                one_line = np.array(LineString(one_line).simplify(args.simplify).coords)
-                pts = one_line[:, :2]
-                x = np.array([pt[0] for pt in pts])
-                y = np.array([pt[1] for pt in pts])
-                ax.plot(
-                    x,
-                    y,
-                    "-",
-                    color=color,
-                    linewidth=20,
-                    markersize=50,
-                    alpha=args.line_opacity,
-                )
-                ax.plot(x, y, "o", color=color, markersize=50)
-
-    plt.grid(False)
-    plt.savefig(
-        pred_save_path, bbox_inches="tight", transparent=args.transparent, dpi=args.dpi
-    )
-    plt.clf()
-    plt.close(fig)
-    print("image saved to : ", pred_save_path)
-
-
-def plot_fig_unmerged_per_frame(
-    num_frames,
-    car_trajectory,
-    x_min,
-    x_max,
-    y_min,
-    y_max,
-    pred_save_folder,
-    id_prev2curr_pred_vectors,
-    id_prev2curr_pred_frame,
-    args,
-):
-
-    os.makedirs(pred_save_folder, exist_ok=True)
-
-    # trace the path reversely, get the sub-sampled traj for visualizing the car
-    pre_center = car_trajectory[-1][0]
-    selected_traj_timesteps = []
-    for timestep, (car_center, rotation_degrees) in enumerate(car_trajectory[::-1]):
-        if (
-            np.linalg.norm(car_center - pre_center) < 5
-            and timestep > 0
-            and timestep < len(car_trajectory) - 1
-        ):
-            continue
-        selected_traj_timesteps.append(len(car_trajectory) - 1 - timestep)
-        pre_center = car_center
-    selected_traj_timesteps = selected_traj_timesteps[::-1]
-
-    # setup the figure with car
-    fig = plt.figure(
-        figsize=(int(abs(x_min) + abs(x_max)) + 10, int(abs(y_min) + abs(y_max)) + 10)
-    )
-    ax = fig.add_subplot(1, 1, 1)
-    ax.set_xlim(x_min, x_max)
-    ax.set_ylim(y_min, y_max)
-    car_img = Image.open("resources/car-orange.png")
-
-    for frame_timestep in range(num_frames):
-
-        faded_rate = np.linspace(0.2, 1, num=len(car_trajectory))
-        if frame_timestep in selected_traj_timesteps:
-            car_center, rotation_degrees = car_trajectory[frame_timestep]
-            translation = transforms.Affine2D().translate(car_center[0], car_center[1])
-            rotation = transforms.Affine2D().rotate_deg(rotation_degrees)
-            rotation_translation = rotation + translation
-            ax.imshow(
-                car_img,
-                extent=[-2.2, 2.2, -2, 2],
-                transform=rotation_translation + ax.transData,
-                alpha=faded_rate[frame_timestep],
-            )
-
-        # plot the vectors
-        for vec_tag, vec_all_frames in id_prev2curr_pred_vectors.items():
-            vec_frame_info = id_prev2curr_pred_frame[vec_tag]
-            if frame_timestep not in vec_frame_info:  # the instance has not appeared
-                continue
-            else:
-                vec_index_in_instance = vec_frame_info[frame_timestep]
-
-            curr_vec = vec_all_frames[vec_index_in_instance]
-            label, vec_glb_idx = vec_tag.split("_")
-            label = int(label)
-            vec_glb_idx = int(vec_glb_idx)
-
-            if label == 0:  # ped_crossing
-                color = "b"
-            elif label == 1:  # divider
-                color = "r"
-            elif label == 2:  # boundary
-                color = "g"
-
-            polyline = LineString(curr_vec)
-            vector = np.array(polyline.coords)
-            pts = vector[:, :2]
-            x = np.array([pt[0] for pt in pts])
-            y = np.array([pt[1] for pt in pts])
-            ax.plot(x, y, "o-", color=color, linewidth=20, markersize=50)
-
-        pred_save_path = pred_save_folder + f"/{frame_timestep}.png"
-        plt.savefig(
-            pred_save_path,
-            bbox_inches="tight",
-            transparent=args.transparent,
-            dpi=args.dpi,
-        )
-        print("image saved to : ", pred_save_path)
-
-    plt.grid(False)
-    plt.clf()
-    plt.close(fig)
-    image_list = [
-        pred_save_folder + f"/{frame_timestep}.png"
-        for frame_timestep in range(num_frames)
-    ]
-    gif_output_path = pred_save_folder + "/vis.gif"
-    save_as_video(image_list, gif_output_path)
-
-
-def plot_fig_unmerged(
-    car_trajectory,
-    x_min,
-    x_max,
-    y_min,
-    y_max,
-    pred_save_path,
-    id_prev2curr_pred_vectors,
-    args,
-):
-
-    # setup the figure with car
-    fig = plt.figure(
-        figsize=(int(abs(x_min) + abs(x_max)) + 10, int(abs(y_min) + abs(y_max)) + 10)
-    )
-    ax = fig.add_subplot(1, 1, 1)
-    ax.set_xlim(x_min, x_max)
-    ax.set_ylim(y_min, y_max)
-    car_img = Image.open("resources/car-orange.png")
-
-    # trace the path reversely, get the sub-sampled traj for visualizing the car
-    pre_center = car_trajectory[-1][0]
-    selected_traj = []
-    selected_timesteps = []
-    for timestep, (car_center, rotation_degrees) in enumerate(car_trajectory[::-1]):
-        if (
-            np.linalg.norm(car_center - pre_center) < 5
-            and timestep > 0
-            and timestep < len(car_trajectory) - 1
-        ):
-            continue
-        selected_traj.append([car_center, rotation_degrees])
-        selected_timesteps.append(len(car_trajectory) - 1 - timestep)
-        pre_center = car_center
-    selected_traj = selected_traj[::-1]
-    selected_timesteps = selected_timesteps[::-1]
-
-    # plot the car trajectory with faded_rate
-    faded_rate = np.linspace(0.2, 1, num=len(car_trajectory))
-    for selected_t, (car_center, rotation_degrees) in zip(
-        selected_timesteps, selected_traj
-    ):
-        translation = transforms.Affine2D().translate(car_center[0], car_center[1])
-        rotation = transforms.Affine2D().rotate_deg(rotation_degrees)
-        rotation_translation = rotation + translation
-        ax.imshow(
-            car_img,
-            extent=[-2.2, 2.2, -2, 2],
-            transform=rotation_translation + ax.transData,
-            alpha=faded_rate[selected_t],
-        )
-
-    # plot the unmerged vectors (all the predicted/ gt vectors)
-    for tag, vecs in id_prev2curr_pred_vectors.items():
-        label, vec_glb_idx = tag.split("_")
-        label = int(label)
-        vec_glb_idx = int(vec_glb_idx)
-
-        if label == 0:  # ped_crossing
-            color = "b"
-        elif label == 1:  # divider
-            color = "r"
-        elif label == 2:  # boundary
-            color = "g"
-
-        polylines = []
-        for vec in vecs:
-            polylines.append(LineString(vec))
-
-        if len(polylines) <= 0:
-            continue
-
-        for one_line in polylines:
-            vector = np.array(one_line.coords)
-            pts = vector[:, :2]
-            x = np.array([pt[0] for pt in pts])
-            y = np.array([pt[1] for pt in pts])
-            ax.plot(x, y, "o-", color=color, linewidth=20, markersize=50)
-
-    plt.savefig(
-        pred_save_path, bbox_inches="tight", transparent=args.transparent, dpi=args.dpi
-    )
-    plt.clf()
-    plt.close(fig)
-    print("image saved to : ", pred_save_path)
-
-
-# the timestep text visualization
-def save_t(t_max, main_save_folder):
-    txt_save_folder = os.path.join(main_save_folder, "txt")
-    os.makedirs(txt_save_folder, exist_ok=True)
-    t = range(t_max)
-
-    for i in t:
-        fig, ax = plt.subplots(
-            figsize=(2, 1), dpi=300
-        )  # Increase DPI for higher resolution
-        ax.text(0.1, 0.5, f"t = {i}", fontsize=40, ha="left", va="center")
-        ax.axis("off")
-        ax.set_xlim(0, 1)
-        ax.set_ylim(0, 1)
-        fig.subplots_adjust(
-            left=0, right=1, top=1, bottom=0
-        )  # Remove margins around the text
-        plt.savefig(f"{txt_save_folder}/text_{i}.png", pad_inches=0)
-        plt.close(fig)
-
-    text_images = [f"{txt_save_folder}/text_{i}.png" for i in t]
-    frames = [imageio.imread(img_path) for img_path in text_images]
-    mp4_output_path = os.path.join(main_save_folder, "text.mp4")
-    imageio.mimsave(
-        mp4_output_path, frames, fps=10
-    )  # fps controls the speed of the video
-    print("mp4 saved to : ", mp4_output_path)
-
-
-def save_as_video(image_list, mp4_output_path, scale=None):
-    mp4_output_path = mp4_output_path.replace(".gif", ".mp4")
-    images = [
-        Image.fromarray(imageio.imread(img_path)).convert("RGBA")
-        for img_path in image_list
-    ]
-
-    if scale is not None:
-        w, h = images[0].size
-        images = [
-            img.resize((int(w * scale), int(h * scale)), Image.Resampling.LANCZOS)
-            for img in images
-        ]
-    # images = [Image.new('RGBA', images[0].size, (255, 255, 255, 255))] + images
-
-    try:
-        imageio.mimsave(mp4_output_path, images, format="MP4", fps=10)
-    except ValueError:  # in case the shapes are not the same, have to manually adjust
-        resized_images = [
-            img.resize(images[0].size, Image.Resampling.LANCZOS) for img in images
-        ]
-        print("Size not all the same, manually adjust...")
-        imageio.mimsave(mp4_output_path, resized_images, format="MP4", fps=10)
-    print("mp4 saved to : ", mp4_output_path)
+    return merged_maps
 
 
 def vis_pred_data(
-    scene_name="", pred_results=None, origin=None, roi_size=None, args=None, dataset=None
+    scene_name="", pred_results=None, origin=None, roi_size=None, args=None
 ):
 
     # get the item index of the scene
@@ -1456,13 +927,13 @@ def vis_pred_data(
         if pred_results[index]["scene_name"] == scene_name:
             index_list.append(index)
 
-    car_trajectory = []
     id_prev2curr_pred_vectors = defaultdict(list)
     id_prev2curr_pred_frame_info = defaultdict(list)
     id_prev2curr_pred_frame = defaultdict(list)
 
     # iterate through each frame
     last_index = index_list[-1]
+    pred_scene_data = defaultdict(list)
     for index in index_list:
 
         vectors = np.array(pred_results[index]["vectors"]).reshape(
@@ -1474,25 +945,6 @@ def vis_pred_data(
             curr_vectors = vectors
 
         # get the transformation matrix of the last frame
-        sample = dataset.samples[index]
-        from pyquaternion import Quaternion
-        lidar2ego = np.eye(4)
-        lidar2ego[:3,:3] = Quaternion(sample['lidar2ego_rotation']).rotation_matrix
-        lidar2ego[:3, 3] = sample['lidar2ego_translation']
-
-        ego2global = np.eye(4)
-        ego2global[:3,:3] = Quaternion(sample['e2g_rotation']).rotation_matrix
-        ego2global[:3, 3] = sample['e2g_translation']
-
-        # NOTE: The original StreamMapNet uses the ego location to query the map,
-        # to align with the lidar-centered setting in MapTR, we made some modifiactions 
-        # here to switch to the lidar-center setting
-        lidar2global = ego2global @ lidar2ego
-        lidar2global_translation = list(lidar2global[:3, 3])
-        lidar2global_translation = [float(x) for x in lidar2global_translation]
-        lidar2global_rotation = list(Quaternion(matrix=lidar2global).q)
-
-
         prev_e2g_trans = torch.tensor(
             pred_results[index]["meta"]["ego2global_translation"], dtype=torch.float64
         )
@@ -1515,27 +967,34 @@ def vis_pred_data(
         curr_g2e_matrix[:3, 3] = -(curr_e2g_rot.T @ curr_e2g_trans)
 
         prev2curr_matrix = curr_g2e_matrix @ prev_e2g_matrix
+
+        pred_scene_data["trajectory"].append(prev2curr_matrix)
+        frame = []
+        for label, vecs in zip(pred_results[index]["labels"], curr_vectors):
+            frame.append({"label": label, "geom": vecs, "type": "vectorized"})
+        pred_scene_data["frames"].append(frame)
+
         prev2curr_pred_vectors = get_prev2curr_vectors(
             curr_vectors, prev2curr_matrix, origin, roi_size, False, False
         )
         prev2curr_pred_vectors = prev2curr_pred_vectors * roi_size + origin
 
-        rotation_degrees = np.degrees(
-            np.arctan2(prev2curr_matrix[:3, :3][1, 0], prev2curr_matrix[:3, :3][0, 0])
-        )
-        car_center = (
-            get_prev2curr_vectors(
-                np.array((0, 0)).reshape(1, 1, 2),
-                prev2curr_matrix,
-                origin,
-                roi_size,
-                False,
-                False,
-            )
-            * roi_size
-            + origin
-        )
-        car_trajectory.append([car_center.squeeze(), rotation_degrees])
+        # vecs = np.stack(curr_vectors, 0)
+        # vecs = torch.tensor(vecs)
+        # N, num_points, _ = vecs.shape
+        # denormed_vecs = vecs
+        # denormed_vecs = torch.cat(
+        #     [
+        #         denormed_vecs,
+        #         denormed_vecs.new_zeros((N, num_points, 1)),  # z-axis
+        #         denormed_vecs.new_ones((N, num_points, 1)),  # 4-th dim
+        #     ],
+        #     dim=-1,
+        # )  # (num_prop, num_pts, 4)
+
+        # prev2curr_pred_vectors2 = torch.einsum(
+        #     "lk,ijk->ijl", prev2curr_matrix, denormed_vecs.double()
+        # ).float()[..., :2]
 
         for i, (label, vec_glb_idx) in enumerate(
             zip(pred_results[index]["labels"], pred_results[index]["global_ids"])
@@ -1555,68 +1014,47 @@ def vis_pred_data(
                 frame_localIdx[frame_time] = local_index
             id_prev2curr_pred_frame[key] = frame_localIdx
 
+    # print(f"roi_size: ")
+    # import matplotlib
+    # matplotlib.use("TkAgg")
+    # fig, ax = plt.subplots()
+    # for frame, pose in zip(pred_scene_data["frames"], pred_scene_data["trajectory"]):
+    #     vecs = np.stack([vec["geom"] for vec in frame], 0)
+    #     vecs = torch.tensor(vecs)
+    #     N, num_points, _ = vecs.shape
+    #     denormed_vecs = vecs
+    #     denormed_vecs = torch.cat(
+    #         [
+    #             denormed_vecs,
+    #             denormed_vecs.new_zeros((N, num_points, 1)),  # z-axis
+    #             denormed_vecs.new_ones((N, num_points, 1)),  # 4-th dim
+    #         ],
+    #         dim=-1,
+    #     )
+    #     transformed_vecs = torch.einsum(
+    #         "lk,ijk->ijl", pose, denormed_vecs.double()
+    #     ).float()[..., :2]
+    #     for i, vec in enumerate(transformed_vecs):
+    #         ax.plot(vec[:, 0], vec[:, 1])
+    # plt.show()
+    # print(f"roi_size: {roi_size}")
+
+
     # sort the id_prev2curr_pred_vectors
     id_prev2curr_pred_vectors = {
         key: id_prev2curr_pred_vectors[key] for key in sorted(id_prev2curr_pred_vectors)
     }
 
-    # set the size of the image
-    x_min = -roi_size[0] / 2
-    x_max = roi_size[0] / 2
-    y_min = -roi_size[1] / 2
-    y_max = roi_size[1] / 2
-
-    all_points = []
-    for vecs in id_prev2curr_pred_vectors.values():
-        points = np.concatenate(vecs, axis=0)
-        all_points.append(points)
-    all_points = np.concatenate(all_points, axis=0)
-
-    x_min = min(x_min, all_points[:, 0].min())
-    x_max = max(x_max, all_points[:, 0].max())
-    y_min = min(y_min, all_points[:, 1].min())
-    y_max = max(y_max, all_points[:, 1].max())
-
-    scene_dir = os.path.join(args.out_dir, scene_name)
-    os.makedirs(scene_dir, exist_ok=True)
-
-    if args.per_frame_result:
-        num_frames = len(index_list)
-        pred_save_folder = os.path.join(scene_dir, f"pred_merged_per_frame")
-        plot_fig_merged_per_frame(
-            num_frames,
-            car_trajectory,
-            x_min,
-            x_max,
-            y_min,
-            y_max,
-            pred_save_folder,
-            id_prev2curr_pred_vectors,
-            id_prev2curr_pred_frame,
-            args,
-        )
-        pred_save_folder = os.path.join(scene_dir, f"pred_unmerged_per_frame")
-        plot_fig_unmerged_per_frame(
-            num_frames,
-            car_trajectory,
-            x_min,
-            x_max,
-            y_min,
-            y_max,
-            pred_save_folder,
-            id_prev2curr_pred_vectors,
-            id_prev2curr_pred_frame,
-            args,
-        )
-    # pred_save_path = os.path.join(scene_dir, f'pred_unmerged.png')
-    # plot_fig_unmerged(car_trajectory, x_min, x_max, y_min, y_max, pred_save_path, id_prev2curr_pred_vectors, args)
-    # pred_save_path = os.path.join(scene_dir, f'pred_merged.png')
-    # plot_fig_merged(car_trajectory, x_min, x_max, y_min, y_max, pred_save_path, id_prev2curr_pred_vectors, args)
-    # comb_save_path = os.path.join(scene_dir, f'pred_comb.png')
-    # image_paths = [os.path.join(scene_dir, f'pred_merged.png'), os.path.join(scene_dir, f'pred_unmerged.png')]
-    # labels = ['Merged', 'Unmerged']
-    # combine_images_with_labels(image_paths, labels, comb_save_path)
-    # print("image saved to : ", comb_save_path)
+    num_frames = len(index_list)
+    merged_maps = plot_fig_merged_per_frame(
+        num_frames,
+        id_prev2curr_pred_vectors, #记录每个instance所有的vector（已经转换到全局坐标系）
+        id_prev2curr_pred_frame, #记录每个instance，每一次出现的帧序号
+        args,
+    )
+    pred_scene_data["merged_maps"] = merged_maps
+    pred_scene_data["scene_name"] = scene_name
+    return pred_scene_data
 
 
 def vis_gt_data(scene_name, args, dataset, gt_data, origin, roi_size):
@@ -1630,10 +1068,6 @@ def vis_gt_data(scene_name, args, dataset, gt_data, origin, roi_size):
         gt_info_list.append(dataset[one_idx])
         ids_info.append(gt_info["instance_ids"][index])
 
-    car_trajectory = []
-    scene_dir = os.path.join(args.out_dir, scene_name)
-    os.makedirs(scene_dir, exist_ok=True)
-
     # key : label, vec_glb_idx ; value : list of vectors in the last frame's coordinate
     id_prev2curr_pred_vectors = defaultdict(list)
     # dict to store some information of the vectors
@@ -1642,6 +1076,7 @@ def vis_gt_data(scene_name, args, dataset, gt_data, origin, roi_size):
     id_prev2curr_pred_frame = defaultdict(dict)
 
     scene_len = len(gt_info_list)
+    gt_scene_data = defaultdict(list)
     for idx in range(scene_len):
         curr_vectors = dict()
         # denormalize the vectors
@@ -1678,6 +1113,16 @@ def vis_gt_data(scene_name, args, dataset, gt_data, origin, roi_size):
 
         # get the transformed vectors from current frame to the last frame
         prev2curr_matrix = curr_g2e_matrix @ prev_e2g_matrix
+
+        gt_scene_data["trajectory"].append(prev2curr_matrix)
+        gt_frame = []
+        for label, vecs in curr_vectors.items():
+            if len(vecs) < 1:
+                continue
+            for vec in vecs:
+                gt_frame.append({"label": label, "geom": vec, "type": "vectorized"})
+        gt_scene_data["gt_frames"].append(gt_frame)
+
         prev2curr_pred_vectors = get_consecutive_vectors_with_opt(
             curr_vectors, prev2curr_matrix, origin, roi_size, False, False
         )
@@ -1700,110 +1145,20 @@ def vis_gt_data(scene_name, args, dataset, gt_data, origin, roi_size):
                 frame_localIdx[frame_time] = local_index
             id_prev2curr_pred_frame[key] = frame_localIdx
 
-        rotation_degrees = np.degrees(
-            np.arctan2(prev2curr_matrix[:3, :3][1, 0], prev2curr_matrix[:3, :3][0, 0])
-        )
-        # get the center of the car in the last frame's coordinate
-        car_center = (
-            get_prev2curr_vectors(
-                np.array((0, 0)).reshape(1, 1, 2),
-                prev2curr_matrix,
-                origin,
-                roi_size,
-                False,
-                False,
-            )
-            * roi_size
-            + origin
-        )
-        car_trajectory.append([car_center.squeeze(), rotation_degrees])
-
     # sort the id_prev2curr_pred_vectors by label and vec_glb_idx
     id_prev2curr_pred_vectors = {
         key: id_prev2curr_pred_vectors[key] for key in sorted(id_prev2curr_pred_vectors)
     }
 
-    # get the x_min, x_max, y_min, y_max for the figure size
-    x_min = -roi_size[0] / 2
-    x_max = roi_size[0] / 2
-    y_min = -roi_size[1] / 2
-    y_max = roi_size[1] / 2
-
-    all_points = []
-    for vecs in id_prev2curr_pred_vectors.values():
-        points = np.concatenate(vecs, axis=0)
-        all_points.append(points)
-    all_points = np.concatenate(all_points, axis=0)
-
-    x_min = min(x_min, all_points[:, 0].min())
-    x_max = max(x_max, all_points[:, 0].max())
-    y_min = min(y_min, all_points[:, 1].min())
-    y_max = max(y_max, all_points[:, 1].max())
-
-    scene_dir = os.path.join(args.out_dir, scene_name)
-    os.makedirs(scene_dir, exist_ok=True)
-
-    # if visulize the per frame result
-    if args.per_frame_result:
-        pred_save_folder = os.path.join(scene_dir, f"gt_merged_per_frame")
-        plot_fig_merged_per_frame(
-            len(gt_info_list),
-            car_trajectory,
-            x_min,
-            x_max,
-            y_min,
-            y_max,
-            pred_save_folder,
-            id_prev2curr_pred_vectors,
-            id_prev2curr_pred_frame,
-            args,
-        )
-        pred_save_folder = os.path.join(scene_dir, f"gt_unmerged_per_frame")
-        plot_fig_unmerged_per_frame(
-            len(gt_info_list),
-            car_trajectory,
-            x_min,
-            x_max,
-            y_min,
-            y_max,
-            pred_save_folder,
-            id_prev2curr_pred_vectors,
-            id_prev2curr_pred_frame,
-            args,
-        )
-    # plot result for across all frames
-    pred_save_path = os.path.join(scene_dir, f"gt_unmerged.png")
-    plot_fig_unmerged(
-        car_trajectory,
-        x_min,
-        x_max,
-        y_min,
-        y_max,
-        pred_save_path,
+    merged_maps = plot_fig_merged_per_frame(
+        len(gt_info_list),
         id_prev2curr_pred_vectors,
+        id_prev2curr_pred_frame,
         args,
     )
-    pred_save_path = os.path.join(scene_dir, f"gt_merged.png")
-    plot_fig_merged(
-        car_trajectory,
-        x_min,
-        x_max,
-        y_min,
-        y_max,
-        pred_save_path,
-        id_prev2curr_pred_vectors,
-        args,
-    )
-
-    # combine the merged and unmerged images into one plot for comparison
-    comb_save_path = os.path.join(scene_dir, f"gt_comb.png")
-    image_paths = [
-        os.path.join(scene_dir, f"gt_merged.png"),
-        os.path.join(scene_dir, f"gt_unmerged.png"),
-    ]
-    labels = ["Merged", "Unmerged"]
-    combine_images_with_labels(image_paths, labels, comb_save_path)
-    print("image saved to : ", comb_save_path)
+    gt_scene_data["gt_merged_maps"] = merged_maps
+    gt_scene_data["scene_name"] = scene_name
+    return gt_scene_data
 
 
 def main():
@@ -1823,19 +1178,22 @@ def main():
         scene_name2idx[scene].append(idx)
 
     # load the GT data
-    if args.option == "vis-gt":
-        data = mmcv.load(args.data_path)
-    # load the prediction data
-    elif args.option == "vis-pred":
-        with open(args.data_path, "rb") as fp:
-            data = pickle.load(fp)
+    gt_data_path = "/home/qzj/datasets/nuscenes/custom/maptracker/nuscenes_map_infos_val_gt_tracks.pkl"
+    gt_data = mmcv.load(gt_data_path)
+
+    pred_data_path = "work_dirs/maptracker_nusc_oldsplit_5frame_span10_stage3_joint_finetune/pos_predictions.pkl"
+    pred_data = pickle.load(open(pred_data_path, "rb"))
 
     all_scene_names = sorted(list(scene_name2idx.keys()))
 
     roi_size = torch.tensor(cfg.roi_size).numpy()
     origin = torch.tensor(cfg.pc_range[:2]).numpy()
 
-    for scene_name in all_scene_names:
+    save_dir = "/home/qzj/datasets/nuscenes/custom/maptracker/mapping_results"
+    os.makedirs(save_dir, exist_ok=True)
+    from tqdm import tqdm
+    all_results = {}
+    for scene_name in tqdm(all_scene_names):
         if args.scene_id is not None and scene_name not in args.scene_id:
             continue
         scene_dir = os.path.join(args.out_dir, scene_name)
@@ -1846,30 +1204,34 @@ def main():
         ):
             print(f"Scene {scene_name} already generated, skipping...")
             continue
-        os.makedirs(scene_dir, exist_ok=True)
 
-        if args.option == "vis-gt":
-            # visualize the GT data
-            vis_gt_data(
-                scene_name=scene_name,
-                args=args,
-                dataset=dataset,
-                gt_data=data,
-                origin=origin,
-                roi_size=roi_size,
-            )
-        elif args.option == "vis-pred":
-            # visualize the prediction results
-            vis_pred_data(
-                scene_name=scene_name,
-                pred_results=data,
-                origin=origin,
-                roi_size=roi_size,
-                args=args,
-                dataset=dataset
-            )
-        else:
-            raise ValueError("Invalid visualization option {}".format(args.option))
+        gt_scene_data = vis_gt_data(
+            scene_name=scene_name,
+            args=args,
+            dataset=dataset,
+            gt_data=gt_data,
+            origin=origin,
+            roi_size=roi_size,
+        )
+
+        pred_scene_data = vis_pred_data(
+            scene_name=scene_name,
+            pred_results=pred_data,
+            origin=origin,
+            roi_size=roi_size,
+            args=args,
+        )
+
+        scene_data = {}
+        scene_data.update(gt_scene_data)
+        scene_data.update(pred_scene_data)
+
+        save_path = os.path.join(save_dir, f"{scene_name}.pkl")
+        mmcv.dump(scene_data, save_path)
+        print(f"Scene {scene_name} saved to {save_path}")
+        all_results[scene_name] = scene_data
+
+    mmcv.dump(all_results, os.path.join(save_dir, "../all_results.pkl"))
 
 
 if __name__ == "__main__":

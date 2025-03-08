@@ -15,10 +15,10 @@ img_w = 800
 img_size = (img_h, img_w)
 
 num_gpus = 8
-batch_size = 6
+batch_size = 2
 num_iters_per_epoch = 27968 // (num_gpus * batch_size)
-num_epochs = 4
-num_epochs_interval = num_epochs
+num_epochs = 48
+num_epochs_interval = num_epochs // 8
 total_iters = num_epochs * num_iters_per_epoch
 num_queries = 100
 
@@ -74,11 +74,11 @@ model = dict(
     test_time_history_steps=20,
     mem_select_dist_ranges=[1, 5, 10, 15],
     skip_vector_head=False,
-    freeze_bev=True,
+    freeze_bev=False,
     track_fp_aug=False,
     use_memory=True,
     mem_len=4,
-    mem_warmup_iters=500,
+    mem_warmup_iters=-1,
     backbone_cfg=dict(
         type="BEVFormerBackbone",
         roi_size=roi_size,
@@ -222,8 +222,7 @@ model = dict(
                     ),
                     feedforward_channels=embed_dims * 2,
                     ffn_dropout=0.1,
-                    # operation_order=('norm', 'self_attn', 'norm', 'cross_attn',
-                    #                 'norm', 'ffn',)
+                    ## an addtional cross attention for vector memory fusion
                     operation_order=(
                         "self_attn",
                         "norm",
@@ -349,7 +348,7 @@ test_pipeline = [
 # DO NOT CHANGE
 eval_config = dict(
     type="NuscDataset",
-    data_root="./datasets/nuscenes",
+    data_root="/home/qzj/datasets/nuscenes",
     ann_file="/home/qzj/datasets/nuscenes/custom/maptracker/nuscenes_map_infos_val.pkl",
     meta=meta,
     roi_size=roi_size,
@@ -385,7 +384,7 @@ eval_config = dict(
 
 match_config = dict(
     type="NuscDataset",
-    data_root="./datasets/nuscenes",
+    data_root="/home/qzj/datasets/nuscenes",
     ann_file="/home/qzj/datasets/nuscenes/custom/maptracker/nuscenes_map_infos_val.pkl",
     meta=meta,
     roi_size=roi_size,
@@ -430,7 +429,7 @@ data = dict(
     workers_per_gpu=8,
     train=dict(
         type="NuscDataset",
-        data_root="./datasets/nuscenes",
+        data_root="/home/qzj/datasets/nuscenes",
         ann_file="/home/qzj/datasets/nuscenes/custom/maptracker/nuscenes_map_infos_train.pkl",
         meta=meta,
         roi_size=roi_size,
@@ -443,8 +442,8 @@ data = dict(
     ),
     val=dict(
         type="NuscDataset",
-        data_root="./datasets/nuscenes",
-        ann_file="/home/qzj/datasets/nuscenes/custom/maptracker/nuscenes_map_infos_val.pkl",
+        data_root="/home/qzj/datasets/nuscenes",
+        ann_file="/home/qzj/datasets/nuscenes/custom/maptracker/nuscenes_map_infos_train.pkl",
         meta=meta,
         roi_size=roi_size,
         cat2id=cat2id,
@@ -455,8 +454,8 @@ data = dict(
     ),
     test=dict(
         type="NuscDataset",
-        data_root="./datasets/nuscenes",
-        ann_file="/home/qzj/datasets/nuscenes/custom/maptracker/nuscenes_map_infos_val.pkl",
+        data_root="/home/qzj/datasets/nuscenes",
+        ann_file="/home/qzj/datasets/nuscenes/custom/maptracker/nuscenes_map_infos_train.pkl",
         meta=meta,
         roi_size=roi_size,
         cat2id=cat2id,
@@ -475,7 +474,11 @@ optimizer = dict(
     lr=5e-4,
     paramwise_cfg=dict(
         custom_keys={
-            "img_backbone": dict(lr_mult=0.1),
+            "backbone.img_backbone": dict(lr_mult=0.1),
+            "backbone.img_neck": dict(lr_mult=0.5),
+            "backbone.transformer": dict(lr_mult=0.5),
+            "backbone.positional_encoding": dict(lr_mult=0.5),
+            "seg_decoder": dict(lr_mult=0.5),
         }
     ),
     weight_decay=1e-2,
@@ -488,8 +491,8 @@ lr_config = dict(
     warmup="linear",
     warmup_iters=500,
     warmup_ratio=1.0 / 3,
-    min_lr_ratio=0.95,
-)  # only slightly decay
+    min_lr_ratio=3e-3,
+)
 
 evaluation = dict(interval=num_epochs_interval * num_iters_per_epoch)
 # evaluation = dict(interval=1) # for debugging use..
@@ -506,6 +509,4 @@ log_config = dict(
 
 SyncBN = True
 
-load_from = (
-    "work_dirs/maptracker_nusc_oldsplit_5frame_span10_stage1_bev_pretrain/latest.pth"
-)
+load_from = "work_dirs/maptracker_nusc_oldsplit_5frame_span10_stage2_warmup/latest.pth"
