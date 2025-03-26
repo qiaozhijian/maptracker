@@ -101,10 +101,16 @@ python tools/visualization/vis_global.py plugin/configs/maptracker/nuscenes_olds
 --out_dir vis_global/nuscenes_old/gt  \
 --option vis-gt --per_frame_result 0
 
-# save results
+# save nuscenes results
 python tools/data_converter/format_pred_gt.py plugin/configs/maptracker/nuscenes_oldsplit/maptracker_nusc_oldsplit_5frame_span10_stage3_joint_finetune.py \
 --data_path work_dirs/maptracker_nusc_oldsplit_5frame_span10_stage3_joint_finetune/pos_predictions.pkl \
 --out_dir vis_global/nuscenes_old/maptracker \
+--option vis-pred  --per_frame_result 1
+
+# save argoverse2 results
+python tools/data_converter/format_pred_gt.py plugin/configs/maptracker/av2_oldsplit/maptracker_av2_oldsplit_5frame_span10_stage3_joint_finetune.py \
+--data_path work_dirs/maptracker_av2_oldsplit_5frame_span10_stage3_joint_finetune/pos_predictions.pkl \
+--out_dir vis_global/av2_old/maptracker \
 --option vis-pred  --per_frame_result 1
 ```
 

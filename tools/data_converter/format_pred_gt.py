@@ -25,6 +25,12 @@ import imageio
 import math
 from tracking.cmap_utils.match_utils import *
 
+Label2Name = {
+    0: "ped_crossing",
+    1: "divider",
+    2: "boundary",
+}
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Visualize groundtruth and results")
@@ -44,7 +50,7 @@ def parse_args():
         "--option", required=True, default="vis-pred", help="vis-pred, vis-gt"
     )
     parser.add_argument(
-        "--simplify", default=0.5, type=float, help="Line simplification tolerance"
+        "--simplify", default=0.2, type=float, help="Line simplification tolerance"
     )
     parser.add_argument("--line_opacity", default=0.75, type=float, help="Line opacity")
     parser.add_argument(
@@ -868,7 +874,9 @@ def plot_fig_merged_per_frame(
                 instance_bank[vec_tag] = [
                     updated_polyline,
                 ]
-                merged_map.append({"label": label, "geom": pts, "type": "vectorized"})
+                merged_map.append(
+                    {"cls_name": Label2Name[label], "geom": pts, "type": "vectorized"}
+                )
 
             elif label == 1:  # divider, merged fitting a polyline
                 if need_merge:
@@ -885,7 +893,13 @@ def plot_fig_merged_per_frame(
                     )
                     pts = one_line[:, :2]
 
-                    merged_map.append({"label": label, "geom": pts, "type": "vectorized"})
+                    merged_map.append(
+                        {
+                            "cls_name": Label2Name[label],
+                            "geom": pts,
+                            "type": "vectorized",
+                        }
+                    )
 
                 # update instance bank for line
                 updated_polylines = [LineString(vec) for vec in polylines_vecs]
@@ -906,7 +920,13 @@ def plot_fig_merged_per_frame(
                     )
                     pts = one_line[:, :2]
 
-                    merged_map.append({"label": label, "geom": pts, "type": "vectorized"})
+                    merged_map.append(
+                        {
+                            "cls_name": Label2Name[label],
+                            "geom": pts,
+                            "type": "vectorized",
+                        }
+                    )
 
                 # update instance bank for line
                 updated_polylines = [LineString(vec) for vec in polylines_vecs]
@@ -971,7 +991,9 @@ def vis_pred_data(
         pred_scene_data["trajectory"].append(prev2curr_matrix)
         frame = []
         for label, vecs in zip(pred_results[index]["labels"], curr_vectors):
-            frame.append({"label": label, "geom": vecs, "type": "vectorized"})
+            frame.append(
+                {"cls_name": Label2Name[label], "geom": vecs, "type": "vectorized"}
+            )
         pred_scene_data["frames"].append(frame)
 
         prev2curr_pred_vectors = get_prev2curr_vectors(
@@ -1039,7 +1061,6 @@ def vis_pred_data(
     # plt.show()
     # print(f"roi_size: {roi_size}")
 
-
     # sort the id_prev2curr_pred_vectors
     id_prev2curr_pred_vectors = {
         key: id_prev2curr_pred_vectors[key] for key in sorted(id_prev2curr_pred_vectors)
@@ -1048,8 +1069,8 @@ def vis_pred_data(
     num_frames = len(index_list)
     merged_maps = plot_fig_merged_per_frame(
         num_frames,
-        id_prev2curr_pred_vectors, #记录每个instance所有的vector（已经转换到全局坐标系）
-        id_prev2curr_pred_frame, #记录每个instance，每一次出现的帧序号
+        id_prev2curr_pred_vectors,  # 记录每个instance所有的vector（已经转换到全局坐标系）
+        id_prev2curr_pred_frame,  # 记录每个instance，每一次出现的帧序号
         args,
     )
     pred_scene_data["merged_maps"] = merged_maps
@@ -1120,7 +1141,9 @@ def vis_gt_data(scene_name, args, dataset, gt_data, origin, roi_size):
             if len(vecs) < 1:
                 continue
             for vec in vecs:
-                gt_frame.append({"label": label, "geom": vec, "type": "vectorized"})
+                gt_frame.append(
+                    {"cls_name": Label2Name[label], "geom": vec, "type": "vectorized"}
+                )
         gt_scene_data["gt_frames"].append(gt_frame)
 
         prev2curr_pred_vectors = get_consecutive_vectors_with_opt(
@@ -1178,20 +1201,34 @@ def main():
         scene_name2idx[scene].append(idx)
 
     # load the GT data
-    gt_data_path = "/home/qzj/datasets/nuscenes/custom/maptracker/nuscenes_map_infos_val_gt_tracks.pkl"
-    gt_data = mmcv.load(gt_data_path)
+    # dataset_name = "nuscenes"
+    dataset_name = "argoverse2"
+    if dataset_name == "nuscenes":
+        gt_data_path = "/home/qzj/datasets/nuscenes/custom/maptracker/nuscenes_map_infos_val_gt_tracks.pkl"
+        gt_data = mmcv.load(gt_data_path)
 
-    pred_data_path = "work_dirs/maptracker_nusc_oldsplit_5frame_span10_stage3_joint_finetune/pos_predictions.pkl"
-    pred_data = pickle.load(open(pred_data_path, "rb"))
+        pred_data_path = "work_dirs/maptracker_nusc_oldsplit_5frame_span10_stage3_joint_finetune/pos_predictions.pkl"
+        pred_data = pickle.load(open(pred_data_path, "rb"))
+
+        save_dir = "/home/qzj/datasets/nuscenes/custom/maptracker/mapping_results"
+    elif dataset_name == "argoverse2":
+        gt_data_path = "/home/qzj/datasets/argoverse2/sensor/custom/maptracker/av2_map_infos_val_gt_tracks.pkl"
+        gt_data = mmcv.load(gt_data_path)
+
+        pred_data_path = "work_dirs/maptracker_av2_oldsplit_5frame_span10_stage3_joint_finetune/pos_predictions.pkl"
+        pred_data = pickle.load(open(pred_data_path, "rb"))
+
+        save_dir = (
+            "/home/qzj/datasets/argoverse2/sensor/custom/maptracker/mapping_results"
+        )
 
     all_scene_names = sorted(list(scene_name2idx.keys()))
 
     roi_size = torch.tensor(cfg.roi_size).numpy()
     origin = torch.tensor(cfg.pc_range[:2]).numpy()
-
-    save_dir = "/home/qzj/datasets/nuscenes/custom/maptracker/mapping_results"
     os.makedirs(save_dir, exist_ok=True)
     from tqdm import tqdm
+
     all_results = {}
     for scene_name in tqdm(all_scene_names):
         if args.scene_id is not None and scene_name not in args.scene_id:

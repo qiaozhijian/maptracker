@@ -352,7 +352,7 @@ test_pipeline = [
 # DO NOT CHANGE
 eval_config = dict(
     type="AV2Dataset",
-    ann_file="./datasets/av2/av2_map_infos_val.pkl",
+    ann_file="/home/qzj/datasets/argoverse2/sensor/custom/maptracker/av2_map_infos_val.pkl",
     meta=meta,
     roi_size=roi_size,
     cat2id=cat2id,
@@ -387,7 +387,7 @@ eval_config = dict(
 
 match_config = dict(
     type="AV2Dataset",
-    ann_file="./datasets/av2/av2_map_infos_val.pkl",
+    ann_file="/home/qzj/datasets/argoverse2/sensor/custom/maptracker/av2_map_infos_val.pkl",
     meta=meta,
     roi_size=roi_size,
     cat2id=cat2id,
@@ -431,7 +431,7 @@ data = dict(
     workers_per_gpu=8,
     train=dict(
         type="AV2Dataset",
-        ann_file="./datasets/av2/av2_map_infos_train.pkl",
+        ann_file="/home/qzj/datasets/argoverse2/sensor/custom/maptracker/av2_map_infos_train.pkl",
         meta=meta,
         roi_size=roi_size,
         cat2id=cat2id,
@@ -443,7 +443,7 @@ data = dict(
     ),
     val=dict(
         type="AV2Dataset",
-        ann_file="./datasets/av2/av2_map_infos_val.pkl",
+        ann_file="/home/qzj/datasets/argoverse2/sensor/custom/maptracker/av2_map_infos_val.pkl",
         meta=meta,
         roi_size=roi_size,
         cat2id=cat2id,
@@ -455,7 +455,7 @@ data = dict(
     ),
     test=dict(
         type="AV2Dataset",
-        ann_file="./datasets/av2/av2_map_infos_val.pkl",
+        ann_file="/home/qzj/datasets/argoverse2/sensor/custom/maptracker/av2_map_infos_val.pkl",
         meta=meta,
         roi_size=roi_size,
         cat2id=cat2id,
