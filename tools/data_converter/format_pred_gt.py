@@ -35,43 +35,16 @@ Label2Name = {
 def parse_args():
     parser = argparse.ArgumentParser(description="Visualize groundtruth and results")
     parser.add_argument("config", help="config file path")
-    parser.add_argument("--out_dir", required=True, default="", help="")
     parser.add_argument(
-        "--data_path", required=True, default="", help="Directory to submission file"
-    )
-    parser.add_argument(
-        "--scene_id",
-        type=str,
-        nargs="+",
-        default=None,
-        help="Specify the scene_id to visulize",
-    )
-    parser.add_argument(
-        "--option", required=True, default="vis-pred", help="vis-pred, vis-gt"
+        "--dataset_name",
+        help="dataset name",
+        default="nuScenes",
+        choices=["nuScenes", "argoverse2"],
     )
     parser.add_argument(
         "--simplify", default=0.2, type=float, help="Line simplification tolerance"
     )
     parser.add_argument("--line_opacity", default=0.75, type=float, help="Line opacity")
-    parser.add_argument(
-        "--overwrite",
-        default=1,
-        type=int,
-        help="Whether to overwrite the existing visualization files",
-    )
-    parser.add_argument(
-        "--per_frame_result",
-        default=1,
-        type=int,
-        help="Whether to visualize per frame result",
-    )
-    parser.add_argument("--dpi", default=20, type=int, help="DPI of the output image")
-    parser.add_argument(
-        "--transparent",
-        default=False,
-        action="store_true",
-        help="Whether to use transparent background",
-    )
 
     args = parser.parse_args()
 
@@ -1231,16 +1204,6 @@ def main():
 
     all_results = {}
     for scene_name in tqdm(all_scene_names):
-        if args.scene_id is not None and scene_name not in args.scene_id:
-            continue
-        scene_dir = os.path.join(args.out_dir, scene_name)
-        if (
-            os.path.exists(scene_dir)
-            and len(os.listdir(scene_dir)) > 0
-            and not args.overwrite
-        ):
-            print(f"Scene {scene_name} already generated, skipping...")
-            continue
 
         gt_scene_data = vis_gt_data(
             scene_name=scene_name,
