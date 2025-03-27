@@ -860,6 +860,7 @@ def plot_fig_merged_per_frame(
                 else:  # if no new instance, use the previous merged polyline to plot
                     polylines_vecs = [np.array(line.coords) for line in polylines]
 
+                polylines_vecs = [vec for vec in polylines_vecs if vec.shape[0] > 1]
                 for one_line in polylines_vecs:
                     one_line = np.array(
                         LineString(one_line).simplify(args.simplify * 2).coords
@@ -887,6 +888,7 @@ def plot_fig_merged_per_frame(
                 else:  # if no new instance, use the previous merged polyline to plot
                     polylines_vecs = [np.array(line.coords) for line in polylines]
 
+                polylines_vecs = [vec for vec in polylines_vecs if vec.shape[0] > 1]
                 for one_line in polylines_vecs:
                     one_line = np.array(
                         LineString(one_line).simplify(args.simplify).coords
