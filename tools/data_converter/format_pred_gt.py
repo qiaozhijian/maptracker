@@ -887,6 +887,7 @@ def plot_fig_merged_per_frame(
                 else:  # if no new instance, use the previous merged polyline to plot
                     polylines_vecs = [np.array(line.coords) for line in polylines]
 
+                polylines_vecs = [vec for vec in polylines_vecs if vec.shape[0] > 1]
                 for one_line in polylines_vecs:
                     one_line = np.array(
                         LineString(one_line).simplify(args.simplify * 2).coords
@@ -914,6 +915,7 @@ def plot_fig_merged_per_frame(
                 else:  # if no new instance, use the previous merged polyline to plot
                     polylines_vecs = [np.array(line.coords) for line in polylines]
 
+                polylines_vecs = [vec for vec in polylines_vecs if vec.shape[0] > 1]
                 for one_line in polylines_vecs:
                     one_line = np.array(
                         LineString(one_line).simplify(args.simplify).coords
@@ -1230,9 +1232,12 @@ def main():
     from tqdm import tqdm
 
     all_results = {}
-    for scene_name in tqdm(all_scene_names):
+    for i, scene_name in enumerate(tqdm(all_scene_names)):
         if args.scene_id is not None and scene_name not in args.scene_id:
             continue
+        print(f"Processing scene {scene_name}...")
+        # if i != 100:
+        #     continue
         scene_dir = os.path.join(args.out_dir, scene_name)
         if (
             os.path.exists(scene_dir)
