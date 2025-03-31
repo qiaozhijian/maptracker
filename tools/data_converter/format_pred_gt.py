@@ -1185,7 +1185,7 @@ def main():
         pred_data_path = "work_dirs/maptracker_nusc_oldsplit_5frame_span10_stage3_joint_finetune/pos_predictions.pkl"
         pred_data = pickle.load(open(pred_data_path, "rb"))
 
-        save_dir = "/home/qzj/datasets/nuscenes/custom/maptracker/mapping_results"
+        save_dir = "/home/qzj/datasets/nuscenes/custom/maptracker/scene_data"
     elif dataset_name == "argoverse2":
         gt_data_path = "/home/qzj/datasets/argoverse2/sensor/custom/maptracker/av2_map_infos_val_gt_tracks.pkl"
         gt_data = mmcv.load(gt_data_path)
@@ -1194,7 +1194,7 @@ def main():
         pred_data = pickle.load(open(pred_data_path, "rb"))
 
         save_dir = (
-            "/home/qzj/datasets/argoverse2/sensor/custom/maptracker/mapping_results"
+            "/home/qzj/datasets/argoverse2/sensor/custom/maptracker/scene_data"
         )
 
     all_scene_names = sorted(list(scene_name2idx.keys()))
